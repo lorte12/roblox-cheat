@@ -1,5 +1,8 @@
 # roblox-cheat
 cheat roblox arsenal se projet et open source et totalement gratuit je ne le vends pas vous pouvez 
+``loadstring(game:HttpGet("https://github.com/jecrois/roblox-cheat/blob/main/source.lua"))()
+``
+
 # catégoris ESP
 <img width="528" height="532" alt="image" src="https://github.com/user-attachments/assets/c29a2145-ddb3-4bc4-8a32-a1a784cf4362" />
 
