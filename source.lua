@@ -30,9 +30,12 @@ local SectionESP2 = TabESP:CreateSection("Player Info")
 
 local TabMBot = Window:CreateTab("M-Bot")
 local SectionMBot = TabMBot:CreateSection("Aimbot")
+local SectionTrigger = TabMBot:CreateSection("Trigger Bot")
+local SectionFire = TabMBot:CreateSection("Fire Modifiers")
 
 local TabExtra = Window:CreateTab("Extra")
 local SectionExtra1 = TabExtra:CreateSection("Mouvement")
+local SectionExtra2 = TabExtra:CreateSection("Téléportation")
 
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -55,7 +58,13 @@ local Aimbot_Toggles = {
     Aimbot = false,
     ShowFOV = false,
     AimPart = "Head",
-    FOVSize = 200
+    FOVSize = 200,
+    TeamCheck = true,
+    TriggerBot = false,
+    TriggerDelay = 0.1,
+    RapidFire = false,
+    NoFireDelay = false,
+    FastFire = false
 }
 
 -- Extra Toggles
@@ -64,7 +73,8 @@ local Extra_Toggles = {
     FlySpeed = 50,
     Noclip = false,
     Speed = false,
-    SpeedValue = 25
+    SpeedValue = 25,
+    TPtoPlayer = false
 }
 
 -- FOV Circle
@@ -160,8 +170,8 @@ end
 local function createHPBar(player)
     local billboard = Instance.new("BillboardGui")
     billboard.Name = "ESP_HPBar_" .. player.Name
-    billboard.Size = UDim2.new(0, 60, 0, 6)  -- Barre plus fine
-    billboard.StudsOffset = Vector3.new(0, -2.2, 0)  -- Position en bas de la box
+    billboard.Size = UDim2.new(0, 60, 0, 6)
+    billboard.StudsOffset = Vector3.new(0, -2.2, 0)
     billboard.AlwaysOnTop = ESP_Toggles.Transparency
     billboard.Enabled = false
     billboard.Adornee = nil
@@ -185,16 +195,61 @@ local function createHPBar(player)
     return billboard
 end
 
+-- Fonction pour vérifier si un joueur est ennemi
+local function isEnemy(player)
+    if not Aimbot_Toggles.TeamCheck then
+        return true
+    end
+    
+    local localPlayer = Players.LocalPlayer
+    if player == localPlayer then
+        return false
+    end
+    
+    if game:GetService("ReplicatedStorage"):FindFirstChild("GetPlayerTeam") then
+        local success, result = pcall(function()
+            return game:GetService("ReplicatedStorage").GetPlayerTeam:InvokeServer(localPlayer) ~= 
+                   game:GetService("ReplicatedStorage").GetPlayerTeam:InvokeServer(player)
+        end)
+        if success then
+            return result
+        end
+    end
+    
+    if player.Team and localPlayer.Team then
+        return player.Team ~= localPlayer.Team
+    end
+    
+    if player.Character and localPlayer.Character then
+        local enemyShirt = player.Character:FindFirstChild("Shirt")
+        local localShirt = localPlayer.Character:FindFirstChild("Shirt")
+        
+        if enemyShirt and localShirt then
+            return enemyShirt.ShirtTemplate ~= localShirt.ShirtTemplate
+        end
+    end
+    
+    return true
+end
+
 -- Initialiser l'ESP
 local function initializeESP(plr)
     if plr == player then return end
     
     if ESP_Drawings[plr] then
-        for _, drawing in pairs(ESP_Drawings[plr]) do
-            if drawing and drawing.Parent then
-                drawing:Destroy()
-            end
+        if ESP_Drawings[plr].Box2D then
+            pcall(function() ESP_Drawings[plr].Box2D:Remove() end)
         end
+        if ESP_Drawings[plr].NameTag then
+            pcall(function() ESP_Drawings[plr].NameTag:Destroy() end)
+        end
+        if ESP_Drawings[plr].DistanceTag then
+            pcall(function() ESP_Drawings[plr].DistanceTag:Destroy() end)
+        end
+        if ESP_Drawings[plr].HPBar then
+            pcall(function() ESP_Drawings[plr].HPBar:Destroy() end)
+        end
+        ESP_Drawings[plr] = nil
     end
     
     local character = plr.Character
@@ -218,6 +273,35 @@ local function initializeESP(plr)
     }
 end
 
+-- Nettoyer l'ESP complètement
+local function cleanUpESP()
+    for plr, drawings in pairs(ESP_Drawings) do
+        if drawings.Box2D then
+            pcall(function() drawings.Box2D:Remove() end)
+        end
+        if drawings.NameTag then
+            pcall(function() drawings.NameTag:Destroy() end)
+        end
+        if drawings.DistanceTag then
+            pcall(function() drawings.DistanceTag:Destroy() end)
+        end
+        if drawings.HPBar then
+            pcall(function() drawings.HPBar:Destroy() end)
+        end
+    end
+    ESP_Drawings = {}
+end
+
+-- Réinitialiser l'ESP
+local function resetESP()
+    cleanUpESP()
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr ~= player then
+            spawn(function() initializeESP(plr) end)
+        end
+    end
+end
+
 -- Initialiser les joueurs
 for _, plr in pairs(Players:GetPlayers()) do
     if plr ~= player then
@@ -231,33 +315,40 @@ end)
 
 Players.PlayerRemoving:Connect(function(plr)
     if ESP_Drawings[plr] then
-        for _, drawing in pairs(ESP_Drawings[plr]) do
-            if drawing and drawing.Parent then
-                drawing:Destroy()
-            end
+        if ESP_Drawings[plr].Box2D then
+            pcall(function() ESP_Drawings[plr].Box2D:Remove() end)
+        end
+        if ESP_Drawings[plr].NameTag then
+            pcall(function() ESP_Drawings[plr].NameTag:Destroy() end)
+        end
+        if ESP_Drawings[plr].DistanceTag then
+            pcall(function() ESP_Drawings[plr].DistanceTag:Destroy() end)
+        end
+        if ESP_Drawings[plr].HPBar then
+            pcall(function() ESP_Drawings[plr].HPBar:Destroy() end)
         end
         ESP_Drawings[plr] = nil
     end
 end)
 
--- Mise à jour ESP
+-- Mise à jour ESP avec nettoyage amélioré
 RunService.RenderStepped:Connect(function()
     for plr, drawings in pairs(ESP_Drawings) do
         local character = plr.Character
+        
         if character and character:FindFirstChild("Humanoid") and character:FindFirstChild("Head") then
             local humanoid = character.Humanoid
             local head = character.Head
             local screenPos, onScreen = camera:WorldToViewportPoint(head.Position)
             
-            -- Mettre à jour les Adornees
             if drawings.NameTag then 
                 drawings.NameTag.Adornee = head
-                drawings.NameTag.Enabled = ESP_Toggles.Name
+                drawings.NameTag.Enabled = ESP_Toggles.Name and humanoid.Health > 0
             end
             
             if drawings.DistanceTag then 
                 drawings.DistanceTag.Adornee = head
-                drawings.DistanceTag.Enabled = ESP_Toggles.Distance
+                drawings.DistanceTag.Enabled = ESP_Toggles.Distance and humanoid.Health > 0
             end
             
             if drawings.HPBar then 
@@ -265,9 +356,8 @@ RunService.RenderStepped:Connect(function()
                 drawings.HPBar.Enabled = ESP_Toggles.HPBar and humanoid.Health > 0
             end
 
-            -- 2D Box
             if drawings.Box2D then
-                if onScreen then
+                if onScreen and humanoid.Health > 0 then
                     local height = math.abs((camera:WorldToViewportPoint(head.Position + Vector3.new(0, 2, 0)).Y - camera:WorldToViewportPoint(head.Position - Vector3.new(0, 2, 0)).Y))
                     local width = height * 0.6
                     
@@ -280,13 +370,11 @@ RunService.RenderStepped:Connect(function()
                 end
             end
 
-            -- Distance
             if drawings.DistanceTag and drawings.DistanceTag.Enabled then
                 local distance = (player.Character and player.Character:FindFirstChild("Head") and (player.Character.Head.Position - head.Position).Magnitude) or 0
                 drawings.DistanceTag.TextLabel.Text = string.format("%.0f studs", distance)
             end
 
-            -- HP Bar
             if drawings.HPBar and drawings.HPBar.Enabled then
                 local healthPercent = humanoid.Health / humanoid.MaxHealth
                 drawings.HPBar.Bar.Size = UDim2.new(healthPercent, 0, 1, 0)
@@ -300,20 +388,82 @@ RunService.RenderStepped:Connect(function()
                 end
             end
         else
-            if drawings.Box2D then drawings.Box2D.Visible = false end
-            if drawings.NameTag then drawings.NameTag.Enabled = false end
-            if drawings.DistanceTag then drawings.DistanceTag.Enabled = false end
-            if drawings.HPBar then drawings.HPBar.Enabled = false end
+            if drawings.Box2D then 
+                drawings.Box2D.Visible = false 
+            end
+            if drawings.NameTag then 
+                drawings.NameTag.Enabled = false 
+                drawings.NameTag.Adornee = nil
+            end
+            if drawings.DistanceTag then 
+                drawings.DistanceTag.Enabled = false 
+                drawings.DistanceTag.Adornee = nil
+            end
+            if drawings.HPBar then 
+                drawings.HPBar.Enabled = false 
+                drawings.HPBar.Adornee = nil
+            end
+            
+            if not plr or not plr.Parent then
+                if drawings.Box2D then pcall(function() drawings.Box2D:Remove() end) end
+                if drawings.NameTag then pcall(function() drawings.NameTag:Destroy() end) end
+                if drawings.DistanceTag then pcall(function() drawings.DistanceTag:Destroy() end) end
+                if drawings.HPBar then pcall(function() drawings.HPBar:Destroy() end) end
+                ESP_Drawings[plr] = nil
+            end
         end
     end
 end)
 
 -- Toggles ESP
-SectionESP1:CreateToggle("2D Box", nil, function(State) ESP_Toggles.Box2D = State end)
-SectionESP2:CreateToggle("Nom", nil, function(State) ESP_Toggles.Name = State end)
-SectionESP2:CreateToggle("Distance", nil, function(State) ESP_Toggles.Distance = State end)
-SectionESP2:CreateToggle("HP Bar", nil, function(State) ESP_Toggles.HPBar = State end)
-SectionESP1:CreateToggle("Rainbow ESP", nil, function(State) ESP_Toggles.Rainbow = State end)
+SectionESP1:CreateToggle("2D Box", nil, function(State) 
+    ESP_Toggles.Box2D = State 
+    if not State then
+        for _, drawings in pairs(ESP_Drawings) do
+            if drawings.Box2D then
+                drawings.Box2D.Visible = false
+            end
+            end
+    end
+end)
+
+SectionESP2:CreateToggle("Nom", nil, function(State) 
+    ESP_Toggles.Name = State 
+    if not State then
+        for _, drawings in pairs(ESP_Drawings) do
+            if drawings.NameTag then
+                drawings.NameTag.Enabled = false
+            end
+        end
+    end
+end)
+
+SectionESP2:CreateToggle("Distance", nil, function(State) 
+    ESP_Toggles.Distance = State 
+    if not State then
+        for _, drawings in pairs(ESP_Drawings) do
+            if drawings.DistanceTag then
+                drawings.DistanceTag.Enabled = false
+            end
+        end
+    end
+end)
+
+SectionESP2:CreateToggle("HP Bar", nil, function(State) 
+    ESP_Toggles.HPBar = State 
+    if not State then
+        for _, drawings in pairs(ESP_Drawings) do
+            if drawings.HPBar then
+                drawings.HPBar.Enabled = false
+            end
+        end
+    end
+end)
+
+SectionESP1:CreateToggle("Rainbow ESP", nil, function(State) 
+    ESP_Toggles.Rainbow = State 
+end)
+
 SectionESP1:CreateToggle("Transparency", nil, function(State) 
     ESP_Toggles.Transparency = State
     for _, drawings in pairs(ESP_Drawings) do
@@ -321,6 +471,11 @@ SectionESP1:CreateToggle("Transparency", nil, function(State)
         if drawings.DistanceTag then drawings.DistanceTag.AlwaysOnTop = State end
         if drawings.HPBar then drawings.HPBar.AlwaysOnTop = State end
     end
+end)
+
+-- Bouton de reset ESP
+SectionESP1:CreateButton("Reset ESP", function()
+    resetESP()
 end)
 
 -- Aimbot Logic
@@ -338,14 +493,14 @@ UserInputService.InputEnded:Connect(function(input)
     end
 end)
 
--- Fonction Aimbot corrigée
+-- Fonction Aimbot avec Team Check
 local function getClosestPlayer()
     local closestPlayer = nil
     local closestDistance = Aimbot_Toggles.FOVSize
     local screenCenter = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
     
     for _, plr in pairs(Players:GetPlayers()) do
-        if plr ~= player and plr.Character and plr.Character:FindFirstChild("Humanoid") then
+        if plr ~= player and isEnemy(plr) and plr.Character and plr.Character:FindFirstChild("Humanoid") then
             local humanoid = plr.Character.Humanoid
             if humanoid.Health > 0 then
                 local aimPart = plr.Character:FindFirstChild(Aimbot_Toggles.AimPart)
@@ -382,6 +537,178 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
+-- =============================================
+-- SYSTÈME RAPID FIRE RÉEL POUR ARSENAL
+-- =============================================
+local rapidFireHooks = {}
+local originalFireRates = {}
+
+local function modifyWeaponFireRate(tool)
+    if not tool or rapidFireHooks[tool] then return end
+    
+    -- Trouver les modules de l'arme
+    for _, module in pairs(tool:GetDescendants()) do
+        if module:IsA("ModuleScript") then
+            local success, required = pcall(function() return require(module) end)
+            if success and type(required) == "table" then
+                -- Sauvegarder les valeurs originales
+                originalFireRates[module] = {
+                    FireRate = required.FireRate,
+                    AutoFireRate = required.AutoFireRate,
+                    SemiFireRate = required.SemiFireRate
+                }
+                
+                -- Modifier les valeurs de tir
+                if Aimbot_Toggles.RapidFire or Aimbot_Toggles.FastFire then
+                    if required.FireRate then required.FireRate = 0.01 end
+                    if required.AutoFireRate then required.AutoFireRate = 0.01 end
+                    if required.SemiFireRate then required.SemiFireRate = 0.01 end
+                end
+                
+                if Aimbot_Toggles.NoFireDelay then
+                    if required.FireDelay then required.FireDelay = 0 end
+                    if required.Delay then required.Delay = 0 end
+                end
+            end
+        end
+    end
+    rapidFireHooks[tool] = true
+end
+
+local function restoreWeaponFireRate(tool)
+    if not tool then return end
+    
+    for module, originalValues in pairs(originalFireRates) do
+        if module and module.Parent then
+            local success, required = pcall(function() return require(module) end)
+            if success and type(required) == "table" then
+                if originalValues.FireRate then required.FireRate = originalValues.FireRate end
+                if originalValues.AutoFireRate then required.AutoFireRate = originalValues.AutoFireRate end
+                if originalValues.SemiFireRate then required.SemiFireRate = originalValues.SemiFireRate end
+            end
+        end
+    end
+    rapidFireHooks[tool] = nil
+end
+
+-- Surveiller les changements d'arme
+local function setupWeaponMonitoring()
+    if player.Character then
+        player.Character.ChildAdded:Connect(function(tool)
+            if tool:IsA("Tool") then
+                wait(0.5) -- Attendre que l'arme soit complètement chargée
+                modifyWeaponFireRate(tool)
+            end
+        end)
+        
+        player.Character.ChildRemoved:Connect(function(tool)
+            if tool:IsA("Tool") then
+                restoreWeaponFireRate(tool)
+            end
+        end)
+        
+        -- Appliquer aux armes existantes
+        for _, tool in pairs(player.Character:GetChildren()) do
+            if tool:IsA("Tool") then
+                modifyWeaponFireRate(tool)
+            end
+        end
+    end
+end
+
+-- Démarrer la surveillance des armes
+setupWeaponMonitoring()
+player.CharacterAdded:Connect(function()
+    wait(1)
+    setupWeaponMonitoring()
+end)
+
+-- =============================================
+-- TRIGGER BOT CORRIGÉ (SANS ÉMULATION SOURIS)
+-- =============================================
+local triggerBotConnection
+local lastTriggerTime = 0
+
+local function startTriggerBot()
+    if triggerBotConnection then
+        triggerBotConnection:Disconnect()
+    end
+    
+    triggerBotConnection = RunService.RenderStepped:Connect(function()
+        if Aimbot_Toggles.TriggerBot and player.Character then
+            local humanoid = player.Character:FindFirstChild("Humanoid")
+            local tool = player.Character:FindFirstChildOfClass("Tool")
+            
+            if humanoid and humanoid.Health > 0 and tool and tick() - lastTriggerTime > Aimbot_Toggles.TriggerDelay then
+                local closestPlayer = getClosestPlayer()
+                if closestPlayer and closestPlayer.Character then
+                    local aimPart = closestPlayer.Character:FindFirstChild(Aimbot_Toggles.AimPart)
+                    if aimPart then
+                        -- Trouver le RemoteEvent de tir et tirer directement
+                        for _, v in pairs(tool:GetDescendants()) do
+                            if v:IsA("RemoteEvent") and (v.Name:find("Fire") or v.Name:find("Shoot") or v.Name:find("Attack")) then
+                                pcall(function()
+                                    v:FireServer()
+                                end)
+                                lastTriggerTime = tick()
+                                break
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end)
+end
+
+local function stopTriggerBot()
+    if triggerBotConnection then
+        triggerBotConnection:Disconnect()
+        triggerBotConnection = nil
+    end
+end
+
+-- =============================================
+-- TP to Player System
+-- =============================================
+local tpConnection
+local lastTPTime = 0
+
+local function startTPtoPlayer()
+    if tpConnection then
+        tpConnection:Disconnect()
+    end
+    
+    tpConnection = RunService.Heartbeat:Connect(function()
+        if Extra_Toggles.TPtoPlayer and player.Character then
+            local humanoid = player.Character:FindFirstChild("Humanoid")
+            local rootPart = player.Character:FindFirstChild("HumanoidRootPart")
+            
+            if humanoid and humanoid.Health > 0 and rootPart and tick() - lastTPTime > 0.5 then
+                local closestPlayer = getClosestPlayer()
+                if closestPlayer and closestPlayer.Character then
+                    local enemyRoot = closestPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    local enemyHumanoid = closestPlayer.Character:FindFirstChild("Humanoid")
+                    
+                    if enemyRoot and enemyHumanoid and enemyHumanoid.Health > 0 then
+                        -- TP juste derrière l'ennemi
+                        local offset = enemyRoot.CFrame.LookVector * -3
+                        rootPart.CFrame = CFrame.new(enemyRoot.Position + offset + Vector3.new(0, 2, 0))
+                        lastTPTime = tick()
+                    end
+                end
+            end
+        end
+    end)
+end
+
+local function stopTPtoPlayer()
+    if tpConnection then
+        tpConnection:Disconnect()
+        tpConnection = nil
+    end
+end
+
 -- Options Aimbot
 SectionMBot:CreateToggle("Aimbot", nil, function(State) 
     Aimbot_Toggles.Aimbot = State 
@@ -398,6 +725,120 @@ end)
 SectionMBot:CreateSlider("FOV Size", 50, 500, 200, true, function(Value)
     Aimbot_Toggles.FOVSize = Value
 end)
+
+SectionMBot:CreateToggle("Team Check", nil, function(State)
+    Aimbot_Toggles.TeamCheck = State
+end)
+
+-- Options Trigger Bot CORRIGÉ
+SectionTrigger:CreateToggle("Trigger Bot", nil, function(State)
+    Aimbot_Toggles.TriggerBot = State
+    if State then
+        startTriggerBot()
+    else
+        stopTriggerBot()
+    end
+end):AddToolTip("Tire automatiquement quand un ennemi est dans le FOV")
+
+SectionTrigger:CreateSlider("Trigger Delay", 0, 1, 0.1, false, function(Value)
+    Aimbot_Toggles.TriggerDelay = Value
+end)
+
+-- Options Fire Modifiers RÉEL
+SectionFire:CreateToggle("Rapid Fire ⚡", nil, function(State)
+    Aimbot_Toggles.RapidFire = State
+    if player.Character then
+        for _, tool in pairs(player.Character:GetChildren()) do
+            if tool:IsA("Tool") then
+                if State then
+                    modifyWeaponFireRate(tool)
+                else
+                    restoreWeaponFireRate(tool)
+                end
+            end
+        end
+    end
+end):AddToolTip("Modifie la cadence de tir des armes")
+
+SectionFire:CreateToggle("Fast Fire", nil, function(State)
+    Aimbot_Toggles.FastFire = State
+    if player.Character then
+        for _, tool in pairs(player.Character:GetChildren()) do
+            if tool:IsA("Tool") then
+                if State then
+                    modifyWeaponFireRate(tool)
+                else
+                    restoreWeaponFireRate(tool)
+                end
+            end
+        end
+    end
+end):AddToolTip("Augmente la vitesse de tir")
+
+SectionFire:CreateToggle("No Fire Delay 🔥", nil, function(State)
+    Aimbot_Toggles.NoFireDelay = State
+    if player.Character then
+        for _, tool in pairs(player.Character:GetChildren()) do
+            if tool:IsA("Tool") then
+                if State then
+                    modifyWeaponFireRate(tool)
+                else
+                    restoreWeaponFireRate(tool)
+                end
+            end
+        end
+    end
+end):AddToolTip("Supprime les délais entre les tirs")
+
+-- Noclip System
+local noclipConnection
+local originalCollision = {}
+
+local function startNoclip()
+    if noclipConnection then
+        noclipConnection:Disconnect()
+    end
+    
+    if player.Character then
+        for _, part in pairs(player.Character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                originalCollision[part] = part.CanCollide
+            end
+        end
+    end
+    
+    noclipConnection = RunService.Stepped:Connect(function()
+        if not Extra_Toggles.Noclip or not player.Character then
+            if noclipConnection then
+                noclipConnection:Disconnect()
+                noclipConnection = nil
+            end
+            return
+        end
+        
+        for _, part in pairs(player.Character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = false
+            end
+        end
+    end)
+end
+
+local function stopNoclip()
+    if noclipConnection then
+        noclipConnection:Disconnect()
+        noclipConnection = nil
+    end
+    
+    if player.Character then
+        for part, canCollide in pairs(originalCollision) do
+            if part and part.Parent then
+                part.CanCollide = canCollide
+            end
+        end
+        originalCollision = {}
+    end
+end
 
 -- Fonctions Extra
 local flyConnection, bodyVelocity, bodyGyro
@@ -514,6 +955,11 @@ end)
 
 SectionExtra1:CreateToggle("Noclip", nil, function(State)
     Extra_Toggles.Noclip = State
+    if State then 
+        startNoclip()
+    else 
+        stopNoclip()
+    end
 end)
 
 SectionExtra1:CreateToggle("Speed", nil, function(State)
@@ -536,6 +982,16 @@ SectionExtra1:CreateSlider("Vitesse Marche", 16, 100, 25, true, function(Value)
     end
 end)
 
+-- Options TP to Player
+SectionExtra2:CreateToggle("TP to Player", nil, function(State)
+    Extra_Toggles.TPtoPlayer = State
+    if State then
+        startTPtoPlayer()
+    else
+        stopTPtoPlayer()
+    end
+end):AddToolTip("Se téléporte sur l'ennemi le plus proche")
+
 -- UI Toggle
 SectionESP1:CreateToggle("UI Toggle", nil, function(State)
     Window:Toggle(State)
@@ -543,4 +999,4 @@ end):CreateKeybind(tostring(Config.Keybind):gsub("Enum.KeyCode.", ""), function(
     Config.Keybind = Enum.KeyCode[Key]
 end):SetState(true)
 
-print("Script chargé avec succès!")
+print("Script chargé! Rapid Fire réel et Trigger Bot corrigé.")
