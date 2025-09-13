@@ -999,4 +999,4 @@ end):CreateKeybind(tostring(Config.Keybind):gsub("Enum.KeyCode.", ""), function(
     Config.Keybind = Enum.KeyCode[Key]
 end):SetState(true)
 
-print("Script chargé! Rapid Fire réel et Trigger Bot corrigé.")
+
